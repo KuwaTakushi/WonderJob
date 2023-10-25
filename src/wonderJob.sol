@@ -31,6 +31,7 @@ error OrderAccepted();
 error InvalidOrderNonce(uint256 orderNonce);
 error InvalidOrderClient();
 error InsufficientEscrowAmount(uint128 escrowAmount);
+error ClientIsTakeOrder();
 
 contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable {
 
@@ -68,7 +69,7 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
     }
 
     function createOrder(
-        uint32 orderDeadline, 
+        uint32 orderDeadline,
         uint128 orderPrice, 
         bytes32 ipfsLink,
         bytes32 hash,
@@ -78,12 +79,12 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
     ) external payable {
         if (!_usersOperation.getUserCustomer(msg.sender) || !_usersOperation.getUserServiceProvider(msg.sender)) revert UserHasNoAuthorization();
         //if (msg.value < orderPrice) revert InsufficientFunds(msg.value);
-        uint256 nonce = getOrderNonce();
+        uint256 nonce = getOrderNonce(msg.sender);
 
         if (msg.sender != hash.recover(v, r, s)) revert InvalidSignature(hash);
         _userOrders._createOrder(
             _orderGenerator,
-            nonce,
+            ++nonce,
             msg.sender,
             orderDeadline,
             orderPrice,
@@ -95,45 +96,36 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
     }
 
     function acceptOrder(address serviceProvider, uint256 orderNonce) external {
-        uint256 nonce;
-        if (orderNonce == _usersOperation.getOrderNonce()) {
-            nonce = _usersOperation.getOrderNonce();
-        } else if (orderNonce < _usersOperation.getOrderNonce()) {
-            nonce = orderNonce;
-        } else {
-            revert InvaildOrderNonce(orderNonce);
-        }
-
-        bytes32 orderId = _usersOperation.getOrderId(msg.sender, nonce);
+        if (orderNonce > getOrderNonce(serviceProvider)) revert InvalidOrderNonce(orderNonce);
+        bytes32 orderId = _userOrders.getOrderId(msg.sender, orderNonce);
         if (!_usersOperation.getUserCustomer(msg.sender)) revert UserHasNoAuthorization();
-        if (_usersOperation.getOrderStatus(msg.sender, nonce, orderId) & 0x400000 != 0) revert OrderInModify();
-        if (_usersOperation.getOrderClient(msg.sender, nonce, orderId) != address(0)) revert OrderAccepted();
+        if (_userOrders.getOrderStatus(msg.sender, orderNonce, orderId) & 0x400000 != 0) revert OrderInModify();
+        if (_userOrders.getOrderClient(msg.sender, orderNonce, orderId) != address(0)) revert OrderAccepted();
         
         require(getClientEscrowFundBalanceof(msg.sender) > 0, "The user escrow fund balance is zero");
-        _userOperation.acceptOrder(serviceProvider, nonce, orderId, msg.sender);
+        _userOrders.acceptOrder(serviceProvider, orderNonce, orderId, msg.sender);
     }
 
     function depositEscrowFundWithClient(uint128 escrowAmount) external payable {
-        uint128 balance = getClientEscrowFundBalanceof(msg.sender);
+        uint256 balance = getClientEscrowFundBalanceof(msg.sender);
         if (balance + escrowAmount < MIN_ESCROW_AMOUNT) revert InsufficientEscrowAmount(escrowAmount);
         _depositEscrowFundWithClient(escrowAmount);
     }
 
     function submitOrder(address serviceProvider, uint256 orderNonce) external {
-        uint256 nonce;
-        bytes32 orderId = _usersOperation.getOrderId(msg.sender, nonce);
+        bytes32 orderId = _userOrders.getOrderId(msg.sender, orderNonce);
         if (!_usersOperation.getUserCustomer(msg.sender)) revert UserHasNoAuthorization();
-        if (_usersOperation.getOrderStatus(msg.sender, nonce, orderId) & 0x400000 != 0) revert OrderInModify();
-        if (_usersOperation.getOrderClient(msg.sender, nonce, orderId) != msg.sender) revert InvalidOrderClient();
+        if (_userOrders.getOrderStatus(msg.sender, orderNonce, orderId) & uint8(0x4) != 0) revert OrderInModify();
+        //if (_userOrders.getOrderClient(msg.sender, orderNonce, orderId) != msg.sender) revert InvalidOrderClient();
 
-        _usersOperation.modiflyOrderStatus(serviceProvider, nonce, orderId, 4);
+        _userOrders.modiflyOrderStatus(serviceProvider, orderNonce, orderId, uint8(0x1));
     }
 
     function cancelOrder(address serviceProvider, uint256 orderNonce) external {
-        if (_usersOperation.getOrderStatus(msg.sender, nonce, orderId) & 0x400000 != 0) revert OrderInModify();
-        bytes32 orderId = _usersOperation.getOrderId(msg.sender, nonce);
+        bytes32 orderId = _userOrders.getOrderId(serviceProvider, orderNonce);
+        if (_userOrders.getOrderStatus(serviceProvider, orderNonce, orderId) & uint8(0x4) != 0) revert OrderInModify();
 
-        _usersOperation.setCancelOrderUser(msg.sender);
+        _userOrders.setCancelOrderUser(serviceProvider, orderNonce, orderId, msg.sender);
         if (
             msg.sender == serviceProvider
             && msg.sender == _userOrders.getOrderServiceProvider(
@@ -154,7 +146,6 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         } catch (bytes memory err){
             revert(string(err));
         }
-
     }
 
     /// @dev Make the function implement 'payable' to eliminate-boundary-checks
@@ -164,7 +155,7 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         Order memory order = _userOrders.getOrderSituationByServiceProvider(msg.sender, _orderGenerator.getOrderNonce(msg.sender), orderId);
         if (feeConfig.getFeeOn()) {
             uint256 feeAmount;
-            unchecked { 
+            unchecked {
                 // Exercise caution with precision loss issue.
                 feeAmount = (
                     order.totalPrice * feeConfig.getFeeScale()) / feeConfig.getfeeDecimal() ^ 1 == 0
@@ -191,18 +182,17 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         }
     }
 
-    function _sendValue(address to, uint256 amount) private {
-        assembly {
-            let s := call(gas(), to, amount, 0x00, 0x00, 0x00, 0x00)
-            if iszero(s) {
-                mstore(0x00, 0xb1c003de) // error `InsufficientSendValue()`
-                revert(0x00, 0x04)
-            }
-        }
+    function withdrowEscrowFundWithClient() external {
+        if (_usersOperation.getTakeOrder(msg.sender)) revert ClientIsTakeOrder();
+        _withdrowEscrowFundWithClient();
     }
 
-    function getOrderNonce() public view returns (uint256) {
-        return _orderGenerator.getOrderNonce(msg.sender);
+    function getOrderNonce(address user) public view returns (uint256) {
+        return _orderGenerator.getOrderNonce(user);
+    }
+
+    function getOrderId() public view returns (bytes32) {
+        return _userOrders.getOrderId(msg.sender, getOrderNonce(msg.sender));
     }
 
     receive() external payable {}

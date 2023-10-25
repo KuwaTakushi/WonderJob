@@ -21,10 +21,10 @@ struct Order {
 library OrderExecutor {
 
     using OrderFeeFulfil for *;
-    uint8 public constant ORDER_STATUS_PUBLISH = 1 << 23;
-    uint8 public constant ORDER_STATUS_MODIFLY = 1 << 22;
-    uint8 public constant ORDER_STATUS_TIMEOUT = 1 << 21;
-    uint8 public constant ORDER_STATUS_SUBMIT  = 1 << 20; 
+    uint256 private constant ORDER_STATUS_PUBLISH = 1 << 23;
+    uint256 private constant ORDER_STATUS_MODIFLY = 1 << 22;
+    uint256 private constant ORDER_STATUS_TIMEOUT = 1 << 21;
+    uint256 private constant ORDER_STATUS_SUBMIT  = 1 << 20; 
 
     /// @dev Share slot one, just like[error ORDER_REPEAT_CREATE(); error ORDER_NOT_FOUND()...]
     bytes4 private constant ORDER_REPEAT_CREATE    = 0x917996a0;
@@ -69,10 +69,10 @@ library OrderExecutor {
     ) internal {
         // Ignore temporary memory request operation.
         // Order memory order = {...}
-        self.orders[user][++orderNonce][_signatureHash] = Order({
+        self.orders[user][orderNonce][_signatureHash] = Order({
             client: address(0),
             paymentStatus: 2,
-            orderStatus: ORDER_STATUS_PUBLISH,
+            orderStatus: uint8(ORDER_STATUS_PUBLISH),
             isOrderComplete: 2,
             launchTime: uint32(block.timestamp),
             deadline: _deadline,
@@ -112,15 +112,15 @@ library OrderExecutor {
         if (self.orders[user][orderNonce][orderId].serviceProvider != user) success = false;
         if (self.orders[user][orderNonce][orderId].isOrderComplete == 1) success = false;
         Order storage order = self.orders[user][orderNonce][orderId];
-        uint8 status = order.orderStatus;
+        uint8 currentStatus = order.orderStatus;
 
-        assembly {
-            if iszero(or(eq(status, 1), success)) {
+        assembly("memory-safe") {
+            if iszero(or(eq(currentStatus, ORDER_STATUS_PUBLISH))) {
                 mstore(0x00, ORDER_CANNOT_MODIFY)
                 revert(0x00, 0x04)
             }
             
-            if (iszero(eq(status, 3))) {
+            if iszero(eq(currentStatus, ORDER_STATUS_TIMEOUT)) {
                 mstore(0x00, ORDER_EXPIRED)
                 revert(0x00, 0x04)                
             }

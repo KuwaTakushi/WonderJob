@@ -35,7 +35,7 @@ abstract contract WonderJobFundEscrowPool is ReentrancyGuard {
         return true;
     }
 
-    function _depositEscrowFundWithClient(uint128 escrowAmount) internal virtual nonReentrant returns (bool) {
+    function _depositEscrowFundWithClient(uint256 escrowAmount) internal virtual nonReentrant returns (bool) {
         unchecked {
             _clientEscrowFundBalanceof[msg.sender] += escrowAmount;
         }
@@ -57,6 +57,19 @@ abstract contract WonderJobFundEscrowPool is ReentrancyGuard {
     }
 
     function _withdrowEscrowFundWithClient() internal virtual nonReentrant returns (bool) {
+        uint256 balance = getClientEscrowFundBalanceof(msg.sender);
+        _sendValue(msg.sender, balance);
+        _clientEscrowFundBalanceof[msg.sender] = 0;
         return true;
+    }
+
+    function _sendValue(address to, uint256 amount) internal {
+        assembly {
+            let s := call(gas(), to, amount, 0x00, 0x00, 0x00, 0x00)
+            if iszero(s) {
+                mstore(0x00, 0xb1c003de) // error `InsufficientSendValue()`
+                revert(0x00, 0x04)
+            }
+        }
     }
 }
