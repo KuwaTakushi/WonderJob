@@ -59,7 +59,8 @@ contract WonderJobArbitration is IWonderJobArbitration {
             let fromBalance := sload(add(fromSlot, 0))
             if lt(fromBalance, amount) {
                 revert(0, 0)
-            }
+            } 
+            // require(msg.sender != to)
             if eq(caller(), to) { revert(0, 0) }
 
             sstore(fromSlot, sub(fromBalance, amount))            
