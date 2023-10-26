@@ -32,13 +32,15 @@ error InvalidOrderNonce(uint256 orderNonce);
 error InvalidOrderClient();
 error InsufficientEscrowAmount(uint128 escrowAmount);
 error ClientIsTakeOrder();
+error OrderException();
 
 contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable {
 
     using ECDSA for bytes32;
     using OrderExecutor for *;
     using UserManagement for UserManagement.UsersOperation;
-
+    using OrderFeeFulfil for OrderFeeFulfil.FeeConfig;
+    
     IWonderJobArbitration public immutable IWonderJobArbitrationCallback;
     UserManagement.UsersOperation private _usersOperation;
     OrderExecutor.OrderGenerator private _orderGenerator;
@@ -54,20 +56,6 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         _usersOperation.createUser(user);
     }
 
-    function getUserProfile() public view returns (User memory _user) {
-        User memory user_ = User({
-            userAddress: msg.sender,
-            isCustomer: _usersOperation.getUserCustomer(msg.sender),
-            isServiceProvider: _usersOperation.getUserServiceProvider(msg.sender),
-            isRegistered: _usersOperation.getUserRegisterStatus(msg.sender),
-            creationTime: _usersOperation.getUserCreationTime(msg.sender)
-        });
-
-        assembly {
-            _user := user_
-        }
-    }
-
     function createOrder(
         uint32 orderDeadline,
         uint128 orderPrice, 
@@ -78,13 +66,15 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         bytes32 s
     ) external payable {
         if (!_usersOperation.getUserCustomer(msg.sender) || !_usersOperation.getUserServiceProvider(msg.sender)) revert UserHasNoAuthorization();
-        //if (msg.value < orderPrice) revert InsufficientFunds(msg.value);
+        if (msg.value < orderPrice) revert InsufficientFunds(msg.value);
+
         uint256 nonce = getOrderNonce(msg.sender);
 
+        if (_userOrders.getOrderServiceProvider(msg.sender, nonce, hash) != address(0)) revert OrderException();
         if (msg.sender != hash.recover(v, r, s)) revert InvalidSignature(hash);
         _userOrders._createOrder(
             _orderGenerator,
-            ++nonce,
+            nonce,
             msg.sender,
             orderDeadline,
             orderPrice,
@@ -97,10 +87,22 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
 
     function acceptOrder(address serviceProvider, uint256 orderNonce) external {
         if (orderNonce > getOrderNonce(serviceProvider)) revert InvalidOrderNonce(orderNonce);
-        bytes32 orderId = _userOrders.getOrderId(msg.sender, orderNonce);
+        bytes32 orderId = _userOrders.getOrderId(serviceProvider, orderNonce);
+        if (_userOrders.getOrderServiceProvider(
+                serviceProvider, 
+                orderNonce,
+                orderId
+            ) == address(0)
+            || _userOrders.getOrderServiceProvider(
+                serviceProvider,
+                orderNonce, 
+                orderId
+            ) != serviceProvider
+        ) revert OrderException();
+
         if (!_usersOperation.getUserCustomer(msg.sender)) revert UserHasNoAuthorization();
-        if (_userOrders.getOrderStatus(msg.sender, orderNonce, orderId) & 0x400000 != 0) revert OrderInModify();
-        if (_userOrders.getOrderClient(msg.sender, orderNonce, orderId) != address(0)) revert OrderAccepted();
+        if (_userOrders.getOrderStatus(serviceProvider, orderNonce, orderId) & uint8(0x4) != 0) revert OrderInModify();
+        if (_userOrders.getOrderClient(serviceProvider, orderNonce, orderId) != address(0)) revert OrderAccepted();
         
         require(getClientEscrowFundBalanceof(msg.sender) > 0, "The user escrow fund balance is zero");
         _userOrders.acceptOrder(serviceProvider, orderNonce, orderId, msg.sender);
@@ -113,10 +115,22 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
     }
 
     function submitOrder(address serviceProvider, uint256 orderNonce) external {
-        bytes32 orderId = _userOrders.getOrderId(msg.sender, orderNonce);
+        bytes32 orderId = _userOrders.getOrderId(serviceProvider, orderNonce);
+        if (_userOrders.getOrderServiceProvider(
+                serviceProvider, 
+                orderNonce,
+                orderId
+            ) == address(0)
+            || _userOrders.getOrderServiceProvider(
+                serviceProvider,
+                orderNonce,
+                orderId
+            ) != serviceProvider
+        ) revert OrderException();
+
         if (!_usersOperation.getUserCustomer(msg.sender)) revert UserHasNoAuthorization();
-        if (_userOrders.getOrderStatus(msg.sender, orderNonce, orderId) & uint8(0x4) != 0) revert OrderInModify();
-        //if (_userOrders.getOrderClient(msg.sender, orderNonce, orderId) != msg.sender) revert InvalidOrderClient();
+        if (_userOrders.getOrderStatus(serviceProvider, orderNonce, orderId) & uint8(0x4) != 0) revert OrderInModify();
+        if (_userOrders.getOrderClient(serviceProvider, orderNonce, orderId) != msg.sender) revert InvalidOrderClient();
 
         _userOrders.modiflyOrderStatus(serviceProvider, orderNonce, orderId, uint8(0x1));
     }
@@ -130,7 +144,7 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
             msg.sender == serviceProvider
             && msg.sender == _userOrders.getOrderServiceProvider(
                 serviceProvider, 
-                orderNonce, 
+                orderNonce,
                 orderId
             )
         ) _withdrowEscrowFund(orderId);
@@ -182,9 +196,21 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         }
     }
 
+    function disputeOrder() external {
+        
+    }
+
+    function resolveisputeOrder() external {
+
+    }
+
     function withdrowEscrowFundWithClient() external {
         if (_usersOperation.getTakeOrder(msg.sender)) revert ClientIsTakeOrder();
         _withdrowEscrowFundWithClient();
+    }
+
+    function setFee(bool enable) public {
+        if (enable) feeConfig.setFeeOn(msg.sender); else feeConfig.setFilpFeeOn(msg.sender);
     }
 
     function getOrderNonce(address user) public view returns (uint256) {
@@ -193,6 +219,20 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
 
     function getOrderId() public view returns (bytes32) {
         return _userOrders.getOrderId(msg.sender, getOrderNonce(msg.sender));
+    }
+
+    function getUserProfile() public view returns (User memory _user) {
+        User memory user_ = User({
+            userAddress: msg.sender,
+            isCustomer: _usersOperation.getUserCustomer(msg.sender),
+            isServiceProvider: _usersOperation.getUserServiceProvider(msg.sender),
+            isRegistered: _usersOperation.getUserRegisterStatus(msg.sender),
+            creationTime: _usersOperation.getUserCreationTime(msg.sender)
+        });
+
+        assembly {
+            _user := user_
+        }
     }
 
     receive() external payable {}

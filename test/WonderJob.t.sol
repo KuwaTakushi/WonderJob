@@ -31,7 +31,7 @@ contract WonderJobTest is Test {
         wonderJob = new WonderJob(address(IWonderJobArbitration));
     
         // /*========== MULIT FORK MAINNET TEST ==========**/
-        FORK_RPC_LISTS[0] = vm.createFork(RPC_LISTS[0], FORK_FIX_BLOCK_NUMBER);
+        //FORK_RPC_LISTS[0] = vm.createFork(RPC_LISTS[0], FORK_FIX_BLOCK_NUMBER);
         //FORK_RPC_LISTS[1] = vm.createFork(RPC_LISTS[1], FORK_FIX_BLOCK_NUMBER);
         //FORK_RPC_LISTS[2] = vm.createFork(RPC_LISTS[2], FORK_FIX_BLOCK_NUMBER);
         //FORK_RPC_LISTS[3] = vm.createFork(RPC_LISTS[3], FORK_FIX_BLOCK_NUMBER);
@@ -67,7 +67,6 @@ contract WonderJobTest is Test {
         wonderJob.createUser(user);
     }
 
-
     /*//////////////////////////////////////////////////////////////////////////
                             ORDER OPERATION FUNCTIONS 
     //////////////////////////////////////////////////////////////////////////*/
@@ -87,11 +86,28 @@ contract WonderJobTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
 
         vm.startPrank(createOrderUser);
-        wonderJob.createOrder(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
+        wonderJob.createOrder{value: 0.1 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
     }
 
     function testCreateOrderExpectReverts() public {
+        (address createOrderUser, uint256 createOrderUserPrivateKey) = makeAddrAndKey('createOrderUser');
+        vm.label(createOrderUser, "serviceProvider");
+        vm.deal(createOrderUser, 1 ether);
+        User memory user = User(createOrderUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
+        wonderJob.createUser(user);
 
+        uint32 orderDeadline = uint32(GLOBAL_UNIX_TIMESTAMP) + uint32(1 days);
+        uint128 orderPrice = 0.1 ether;
+        bytes32 ipfsLink = bytes32(bytes("https://ipfs.io/ipfs/QmNZiPk974vDsPmQii3YbrMKfi12KTSNM7XMiYyiea4VYZ/example"));
+        uint256 nonce = wonderJob.getOrderNonce(createOrderUser);
+        bytes32 digest = bytes32(abi.encodePacked(orderDeadline, orderPrice, ipfsLink, nonce));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
+
+        vm.startPrank(createOrderUser);
+        vm.expectRevert();
+        wonderJob.createOrder{value: 0.01 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
+    
     }
 
     function testAcceptOrder() public {
@@ -111,7 +127,7 @@ contract WonderJobTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
 
         vm.startPrank(createOrderUser);
-        wonderJob.createOrder(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
+        wonderJob.createOrder{value: 0.1 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
         vm.startPrank(createOrderUser);
         uint256 orderNonce = wonderJob.getOrderNonce(createOrderUser);
         console.logUint(orderNonce);
@@ -129,7 +145,7 @@ contract WonderJobTest is Test {
         vm.label(clientUser, "client");
         vm.deal(clientUser, 1 ether);
         wonderJob.depositEscrowFundWithClient(1 ether);
-        wonderJob.acceptOrder(createOrderUser, orderNonce);
+        wonderJob.acceptOrder(createOrderUser, 0);
         vm.stopPrank();
     }
 
@@ -150,7 +166,7 @@ contract WonderJobTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
 
         vm.startPrank(createOrderUser);
-        wonderJob.createOrder(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
+        wonderJob.createOrder{value: 0.1 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
         vm.startPrank(createOrderUser);
         uint256 orderNonce = wonderJob.getOrderNonce(createOrderUser);
         console.logUint(orderNonce);
@@ -171,7 +187,7 @@ contract WonderJobTest is Test {
         ///wonderJob.depositEscrowFundWithClient(1 ether);
         vm.expectRevert(bytes( "The user escrow fund balance is zero"));
 
-        wonderJob.acceptOrder(createOrderUser, orderNonce);
+        wonderJob.acceptOrder(createOrderUser, 0);
         vm.stopPrank();   
     }
 
@@ -196,8 +212,7 @@ contract WonderJobTest is Test {
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
 
             vm.startPrank(createOrderUser);
-            wonderJob.createOrder(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
-            vm.startPrank(createOrderUser);
+            wonderJob.createOrder{value: 0.1 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
             orderNonce = wonderJob.getOrderNonce(createOrderUser);
             console.logUint(orderNonce);
             vm.stopPrank();
@@ -208,18 +223,61 @@ contract WonderJobTest is Test {
             address clientUser = makeAddr("client");
             vm.label(clientUser, "client");
             vm.deal(clientUser, 1 ether);
+            vm.startPrank(clientUser);
             User memory client = User(clientUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
             wonderJob.createUser(client);
-        
-            vm.startPrank(clientUser);
-            vm.label(clientUser, "client");
-            vm.deal(clientUser, 1 ether);
             wonderJob.depositEscrowFundWithClient(1 ether);
-        
-            wonderJob.acceptOrder(createOrderUser, orderNonce);
+            wonderJob.acceptOrder(createOrderUser, 0);
             // Submit order
-            wonderJob.submitOrder(createOrderUser, orderNonce);
+            wonderJob.submitOrder(createOrderUser, 0);
             vm.stopPrank();
         }
+    }
+
+    function testSubmitOrderExpectReverts() public {
+        // Create Order
+        address createOrderUser;
+        uint256 createOrderUserPrivateKey;
+        uint256 orderNonce;
+        {
+            (createOrderUser, createOrderUserPrivateKey) = makeAddrAndKey('acceptOrder');
+            vm.label(createOrderUser, "serviceProvider");
+            vm.deal(createOrderUser, 1 ether);
+            User memory user = User(createOrderUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
+            wonderJob.createUser(user);
+
+            uint32 orderDeadline = uint32(GLOBAL_UNIX_TIMESTAMP) + uint32(1 days);
+            uint128 orderPrice = 0.1 ether;
+            bytes32 ipfsLink = bytes32(bytes("https://ipfs.io/ipfs/QmNZiPk974vDsPmQii3YbrMKfi12KTSNM7XMiYyiea4VYZ/example"));
+            uint256 nonce = wonderJob.getOrderNonce(createOrderUser);
+            bytes32 digest = bytes32(abi.encodePacked(orderDeadline, orderPrice, ipfsLink, nonce));
+
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
+
+            vm.startPrank(createOrderUser);
+            wonderJob.createOrder{value: 0.1 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
+            orderNonce = wonderJob.getOrderNonce(createOrderUser);
+            console.logUint(orderNonce);
+            vm.stopPrank();
+        }
+
+        {
+            // Accept order
+            address clientUser = makeAddr("client");
+            vm.label(clientUser, "client");
+            vm.deal(clientUser, 1 ether);
+            vm.startPrank(clientUser);
+            User memory client = User(clientUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
+            wonderJob.createUser(client);
+            wonderJob.depositEscrowFundWithClient(1 ether);
+            wonderJob.acceptOrder(createOrderUser, 0);
+            // Submit order
+            vm.expectRevert();
+            wonderJob.submitOrder(address(0), 0);
+            vm.stopPrank();
+        }
+    }
+
+    function testCancelOrder() public {
     }
 }

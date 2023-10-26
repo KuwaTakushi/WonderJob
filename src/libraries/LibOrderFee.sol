@@ -12,7 +12,7 @@ library OrderFeeFulfil {
         uint24  feeMaxScale; // [72: 256]
         uint24  feeMinScale; // [96: 256]
         address lastExecutor; // [256: 256]
-        bool    feeOn;        
+        bool    feeOn;
         address feeTo;
     }
 

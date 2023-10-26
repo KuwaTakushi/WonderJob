@@ -1,0 +1,12 @@
+| src/wonderJob.sol:WonderJob contract |                 |        |        |        |         |
+|--------------------------------------|-----------------|--------|--------|--------|---------|
+| Deployment Cost                      | Deployment Size |        |        |        |         |
+| 1515118                              | 7919            |        |        |        |         |
+| Function Name                        | min             | avg    | median | max    | # calls |
+| acceptOrder                          | 8229            | 21717  | 28461  | 28461  | 3       |
+| createOrder                          | 169125          | 169125 | 169125 | 169125 | 4       |
+| createUser                           | 1695            | 23464  | 25883  | 25887  | 10      |
+| depositEscrowFundWithClient          | 24684           | 24684  | 24684  | 24684  | 2       |
+| getOrderNonce                        | 583             | 1725   | 2583   | 2583   | 7       |
+| getUserProfile                       | 1675            | 1675   | 1675   | 1675   | 1       |
+| submitOrder                          | 4580            | 4580   | 4580   | 4580   | 1       |

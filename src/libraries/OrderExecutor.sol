@@ -26,7 +26,7 @@ library OrderExecutor {
     uint256 private constant ORDER_STATUS_TIMEOUT = 1 << 21;
     uint256 private constant ORDER_STATUS_SUBMIT  = 1 << 20; 
 
-    /// @dev Share slot one, just like[error ORDER_REPEAT_CREATE(); error ORDER_NOT_FOUND()...]
+    /// @dev Share slot 5, just like[error ORDER_REPEAT_CREATE(); error ORDER_NOT_FOUND()...]
     bytes4 private constant ORDER_REPEAT_CREATE    = 0x917996a0;
     bytes4 private constant ORDER_NOT_FOUND        = 0xb06cb8c9;
     bytes4 private constant ORDER_STATUS_REVERT    = 0x87504b96;
@@ -92,7 +92,7 @@ library OrderExecutor {
 
         self.orderIds[user][orderNonce] = _signatureHash;
         incrementOrderNonces(orderGenerator, user); 
-        emit CreateOrder(user, _deadline, 1, orderNonce++);
+        emit CreateOrder(user, _deadline, 1, orderNonce);
     }
 
     function incrementOrderNonces(OrderGenerator storage self, address user) internal {
@@ -112,17 +112,17 @@ library OrderExecutor {
         if (self.orders[user][orderNonce][orderId].serviceProvider != user) success = false;
         if (self.orders[user][orderNonce][orderId].isOrderComplete == 1) success = false;
         Order storage order = self.orders[user][orderNonce][orderId];
+        
         uint8 currentStatus = order.orderStatus;
-
         assembly("memory-safe") {
-            if iszero(or(eq(currentStatus, ORDER_STATUS_PUBLISH))) {
+            if iszero(iszero(and(currentStatus, ORDER_STATUS_PUBLISH))) {
                 mstore(0x00, ORDER_CANNOT_MODIFY)
                 revert(0x00, 0x04)
             }
             
-            if iszero(eq(currentStatus, ORDER_STATUS_TIMEOUT)) {
+            if iszero(iszero(and(currentStatus, ORDER_STATUS_TIMEOUT))) {
                 mstore(0x00, ORDER_EXPIRED)
-                revert(0x00, 0x04)                
+                revert(0x00, 0x04)
             }
         }
 
@@ -132,6 +132,7 @@ library OrderExecutor {
     function getfeeDecimal(OrderFeeFulfil.FeeConfig storage self) internal view returns (uint256 feeDecimal) {
         (feeDecimal,,,,,,) = self._getFeeConfigParams();
     }
+    
     function getFeeScale(OrderFeeFulfil.FeeConfig storage self) internal view returns (uint256 feeScale) {
         (, feeScale,,,,,) = self._getFeeConfigParams();
     }

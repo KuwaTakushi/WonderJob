@@ -23,7 +23,7 @@ library UserManagement {
      * 162 bits          | Status(registered)    |
      * 163~193 bits      | Creation time         |
      * 194 bits          | Take Order            |
-     * ------------------------------------------+
+     *-------------------------------------------+
      */
     uint256 private constant BITMASK_USER = (1 << 160) - 1;
     uint256 private constant BITMASK_COUSTOMER = 160;
@@ -36,7 +36,7 @@ library UserManagement {
     uint256 private constant SERVICE_PROVIDER_FLAG = 1;
     uint256 private constant REGISTERED_FLAG = 1;
 
-    /// @dev     
+    /// @dev 
     /// `UsersPackedStorage` is type UsersPackedStorage is uint256 
     struct UsersOperation {
         mapping (address anyUsers => uint256 UsersPackedStorage) usersBitMap;
@@ -49,6 +49,7 @@ library UserManagement {
     function createUser(UsersOperation storage self, User calldata user) internal {
         bool success = true;
         if (getUserRegisterStatus(self, user.userAddress)) success = false;
+        if (!user.isCustomer && !user.isServiceProvider) success = false;
         
         uint256 creationTime = block.timestamp;
         // Make user's address the lower 160 bits.
