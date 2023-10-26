@@ -278,6 +278,47 @@ contract WonderJobTest is Test {
         }
     }
 
-    function testCancelOrder() public {
+    function testCancelOrderWithServiceProvider() public {
+        // Create Order
+        address createOrderUser;
+        uint256 createOrderUserPrivateKey;
+        uint256 orderNonce;
+        {
+            (createOrderUser, createOrderUserPrivateKey) = makeAddrAndKey('acceptOrder');
+            vm.label(createOrderUser, "serviceProvider");
+            vm.deal(createOrderUser, 1 ether);
+            User memory user = User(createOrderUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
+            wonderJob.createUser(user);
+
+            uint32 orderDeadline = uint32(GLOBAL_UNIX_TIMESTAMP) + uint32(1 days);
+            uint128 orderPrice = 0.1 ether;
+            bytes32 ipfsLink = bytes32(bytes("https://ipfs.io/ipfs/QmNZiPk974vDsPmQii3YbrMKfi12KTSNM7XMiYyiea4VYZ/example"));
+            uint256 nonce = wonderJob.getOrderNonce(createOrderUser);
+            bytes32 digest = bytes32(abi.encodePacked(orderDeadline, orderPrice, ipfsLink, nonce));
+
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
+
+            vm.startPrank(createOrderUser);
+            wonderJob.createOrder{value: 0.1 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
+            orderNonce = wonderJob.getOrderNonce(createOrderUser);
+            console.logUint(orderNonce);
+            vm.stopPrank();
+        }
+
+        {
+            // Accept order
+            address clientUser = makeAddr("client");
+            vm.label(clientUser, "client");
+            vm.deal(clientUser, 1 ether);
+            vm.startPrank(clientUser);
+            User memory client = User(clientUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
+            wonderJob.createUser(client);
+            wonderJob.depositEscrowFundWithClient(1 ether);
+            wonderJob.acceptOrder(createOrderUser, 0);
+            // Cancel order
+            vm.expectRevert();
+            wonderJob.submitOrder(address(0), 0);
+            vm.stopPrank();
+        }
     }
 }

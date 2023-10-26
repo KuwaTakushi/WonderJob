@@ -143,7 +143,7 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         if (
             msg.sender == serviceProvider
             && msg.sender == _userOrders.getOrderServiceProvider(
-                serviceProvider, 
+                serviceProvider,
                 orderNonce,
                 orderId
             )
@@ -153,8 +153,7 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         try IWonderJobArbitrationCallback.orderValidatorCallWithFallback(msg.sender, order) returns (bool fallbackStatus) {
             assembly {
                 if iszero(fallbackStatus) {
-                    mstore(0x00, 0xa)
-                    revert(0x00, 0x04)
+                    revert(0x00, 0x00)
                 }
             }
         } catch (bytes memory err){
