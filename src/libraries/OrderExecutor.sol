@@ -5,17 +5,15 @@ import {OrderFeeFulfil} from "./LibOrderFee.sol";
 
 struct Order {
     address client; // [160: 256]
-
-    uint8   paymentStatus; // [8: 256]  
-    uint8   orderStatus; // [16: 256]       1000: publish 0100: modifly 0010: timeout 0001. submit 
-    uint8   isOrderComplete; // [24: 256]   1: complete 2: in complete
-    uint32  launchTime; // [56: 256]
-    uint32  deadline;   // [88: 256]
-    address serviceProvider; // [248: 256]
-    uint128 totalPrice;
+    uint8   orderStatus; // [8: 256]       1000: publish 0100: modifly 0010: timeout 0001. submit 
+    uint8   isOrderComplete; // [16: 256]   1: complete 2: in complete
+    uint32  launchTime; // [48: 256]
+    uint32  deadline;   // [80: 256]
+    address serviceProvider; // [240: 256]
 
     bytes32 ipfsLink;       // Include a background or description.
-    address cancelOrderUser; 
+    uint96 totalPrice;     // [96: 256]
+    address cancelOrderUser; // [256: 256]
 }
 
 library OrderExecutor {
@@ -48,12 +46,13 @@ library OrderExecutor {
 
     event CreateOrder(address indexed publisher, uint256 indexed orderDeadline, uint256 indexed orderStatus, uint256 orderNonce);
 
-    function initialize(OrderFeeFulfil.FeeConfig storage self, address initializeOwner, uint24 feeScale, uint24 feeMinScale, uint24 feeMaxScale) internal {
-        uint24[3] memory feeScales;
+    function initialize(OrderFeeFulfil.FeeConfig storage self, address initializeOwner, uint24 feeScale, uint24 feeMinScale, uint24 feeMaxScale, uint24 feeDecimal) internal {
+        uint24[4] memory feeScales;
         feeScales[0] = feeScale;
         feeScales[1] = feeMinScale;
         feeScales[2] = feeMaxScale;
-        self.setFeeScale(feeScales, initializeOwner);
+        feeScales[3] = feeDecimal;
+        self.setFeeScale(feeScales, initializeOwner, initializeOwner);
         self.setFeeOn(initializeOwner);
     }
 
@@ -63,7 +62,7 @@ library OrderExecutor {
         uint256 orderNonce,
         address user,
         uint32 _deadline,
-        uint128 _totalPrice,
+        uint96 _totalPrice,
         bytes32 _ipfsLink,
         bytes32 _signatureHash
     ) internal {
@@ -71,15 +70,14 @@ library OrderExecutor {
         // Order memory order = {...}
         self.orders[user][orderNonce][_signatureHash] = Order({
             client: address(0),
-            paymentStatus: 2,
             orderStatus: uint8(ORDER_STATUS_PUBLISH),
             isOrderComplete: 2,
             launchTime: uint32(block.timestamp),
             deadline: _deadline,
             serviceProvider: user,
             totalPrice: _totalPrice,
-            ipfsLink: _ipfsLink,
-            cancelOrderUser: address(0)
+            cancelOrderUser: address(0),
+            ipfsLink: _ipfsLink
         });
 
         // End <= start

@@ -1,76 +1,51 @@
 # WonderJob
 
-> [中文] [English]
-
-## Table of Contents
-
-- Introduction
-- Features
-- How It Works
-- Security
-- Contribution
-
----
-
 ## Introduction
-
-WonderJob is a decentralized task hosting platform based on Web3 technology. It aims to provide a transparent and secure environment for users to post and accept various types of tasks.
+WonderJob为web3远程工作平台解决方案，意为填补web3招聘类板块的最后一个缺口。可以借助web3的去中心化、自动托管机制的优势创作一个全新于web2的解决方案。
 
 ---
 
 ## Features
+### 用户管理
+实际上用户分为派发任务的托管者与任务委托者，用户注册的时候必须强绑定其中一个身份或者是可以兼任两个身份属性，也就是即是任务的托管者与任务的委托者。
 
-### User Registration
+---
+### 订单履行
+订单系统部分由任务派发者实施，创建一个任务需求后，`OrderExecutor`实际上会帮助任务派发者生成一个订单结构，也就是struct `Order`，其中创建前需要派发者对订单的Nonce，价格和过期时间等重要数据进行签名操作，签名数据将在合约中校验并存入为`OrderId`，`OrderId`只有任务派发者可见。
 
-Users can register as either Task Posters or Task Doers, or both.
-
-功能描述：用户注册分为接单者和发单者，用户可以同时注册这两种类型。
-
-### Task Posting
-
-Only Task Posters can post tasks, specifying the task amount, deadline, etc. Task descriptions are stored in an IPFS link and the task funds are escrowed in a smart contract.
-
-功能描述：发单者才可以发布任务，规定任务金额，期限等等，任务描述信息存储在 IPFS链接中，上链ipfs，并将任务资金托管到托管合约内。
-
-### Task Acceptance
-
-Task Doers can accept tasks but are required to deposit a certain amount (e.g., 500 USDT) as collateral.
-
-功能描述：接单者接任务，但是需要缴纳平台设定的额度的金额，比如500USDT，用于接单的资金托管，违规时可以使用这笔押金进行处理。
-
-### Task Cancellation
-
-Both Task Posters and Task Doers can cancel tasks, with different consequences.
-
-功能描述：取消任务分为发单者和接单者，如果是发单者取消任务，任务状态更改为已弃用，并返还托管任务的所有金额，如果是接单者取消任务，则不做任何操作，接单者会被扣除信用积分或者一定次数后禁止接单。
-
-### Task Submission
-
-Task Doers can submit tasks. Late submissions will result in a deduction of credit points.
-
-功能描述：接单者提交任务时，如果超时提交，那么提交时会扣除一定信用分，按时提交的话，任务等待发单者审核。
-
-### Task Completion
-
-Upon satisfactory completion, the task amount is transferred to the Task Doer.
-
-功能描述：如果任务没有问题，发单者点击完成，任务金额会发送到接单者地址上，如果平台开启费用开关，则会一部分费用金额划转到平台地址中。
+订单创建包含了任务委托者, 订单状态, 过期时间和ipfs包含的任务描述内容链接等重要信息, 订单创建时请确保钱包有足够的资产用于支付任务报酬的资金，托管到`WonderJobFundEscrowPool`合约。最后当委托者完成任务上传并且审核无误后，由任务派发者完成订单，托管的资金会被下发到任务委托者地址中，至此完成了整个任务的流程。
 
 ---
 
-## How It Works
-
-- Smart Contract Architecture
-- User Guide
-
-## Security
-
-- Audit Information
-
-## Contribution
-
-- Contribution Guidelines
+### 平台费用
+当完成所有任务流程后，如果开启费用，例如：平台开启1%的费用，实际上任务委托者实际收到的报酬为(reward - reward * 1%)
 
 ---
+### 信用分系统
+`WonderJobArbitration` 为独立的仲裁合约，`orderValidatorCallWithFallback(address user, Order calldata params)` 接口负责信用分回调，其中为了提升用户感知，运用了大量的Gas optimized进行设计，在任务委托者和任务派发者中间操作(取消订单，完成订单，提交订单)时评估用户操作，可以理解为订单超时，纠纷次数太多，新用户第一次完成订单等给予信用分奖励和惩罚。
 
-Made with ❤️ by WonderJob Team
+对于信用分低于预期的50分，介于0～10之间，将无法参与任何任务委托操作，直到分数达到要求。不满足的用户可以向其他用户买分或者是转移信用分，直到达到最低信用分阀值。
+
+--- 
+### 代理升级
+使用Beacon代理模式实现可升级合约，所有一切调用方式将由`beaconProxy` 进行`delegateCall`调用到`WonderJob`合约。
+
+---
+### 接下来实现的V2方案
+- V2版本增加广告激励部分，把广告激励(10%-50%)流入到用户中，实现流动性激励方案，这根据用户的等级或者分数来决定，具体来讲可能是`CreditScore`或者根据`UserEstimate`来评估。
+- 纠纷订单：
+    - 链下纠纷，复杂的链下纠纷问题，交由Role组来介入解决，会双向收取介入费用(1%-5%)，`Role`组管理成员增添删减。
+    - 链上纠纷，某些用户像刚刚提到的`CreditScore`或者根据`UserEstimate`来决定哪些用户拥有投票权，双向收取费用(1-5%)并下放到所有投票用户地址中。
+
+- 😈恶意用户：
+    
+    恶意用户作恶行为和成本十分的简单和低廉，其中包括可能的重入、绕过、MEV和构造signature等等
+    - 增加一个回调行为检查，惩罚恶意用户
+
+## Test
+```solidity
+forge test [-v] [-vv] [-vvv] -[vvvv]
+```
+
+
+

@@ -41,7 +41,7 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
     using UserManagement for UserManagement.UsersOperation;
     using OrderFeeFulfil for OrderFeeFulfil.FeeConfig;
     
-    IWonderJobArbitration public immutable IWonderJobArbitrationCallback;
+    IWonderJobArbitration public immutable WonderJobArbitration;
     UserManagement.UsersOperation private _usersOperation;
     OrderExecutor.OrderGenerator private _orderGenerator;
     OrderExecutor.UserOrders private _userOrders;
@@ -49,16 +49,18 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
 
     constructor(address IWonderJobArbitrationAddress) WonderJobFundEscrowPool(1e14) initializer {
         __Ownable_init(msg.sender);
-        IWonderJobArbitrationCallback = IWonderJobArbitration(IWonderJobArbitrationAddress);
+        WonderJobArbitration = IWonderJobArbitration(IWonderJobArbitrationAddress);
+        // feeConfig.initialize();
     }
 
     function createUser(User calldata user) public {
         _usersOperation.createUser(user);
+        WonderJobArbitration.initializeUserEstimate(user.userAddress);
     }
 
     function createOrder(
         uint32 orderDeadline,
-        uint128 orderPrice, 
+        uint96 orderPrice, 
         bytes32 ipfsLink,
         bytes32 hash,
         uint8 v,
@@ -150,19 +152,13 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         ) _withdrowEscrowFund(orderId);
 
         Order memory order = _userOrders.getOrderSituationByServiceProvider(serviceProvider, orderNonce, orderId);
-        try IWonderJobArbitrationCallback.orderValidatorCallWithFallback(msg.sender, order) returns (bool fallbackStatus) {
-            assembly {
-                if iszero(fallbackStatus) {
-                    revert(0x00, 0x00)
-                }
-            }
-        } catch (bytes memory err){
-            revert(string(err));
-        }
+        WonderJobArbitration.orderValidatorCallWithFallback(msg.sender, order);
+
     }
 
     /// @dev Make the function implement 'payable' to eliminate-boundary-checks
     /// require(msg.value >= 0)
+    event A(uint feeAmount, uint completeRewardAmount, uint price);
     function completeOrder(bytes32 orderId) external payable {
         uint256 completeRewardAmount;
         Order memory order = _userOrders.getOrderSituationByServiceProvider(msg.sender, _orderGenerator.getOrderNonce(msg.sender), orderId);
@@ -172,9 +168,10 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
                 // Exercise caution with precision loss issue.
                 feeAmount = (
                     order.totalPrice * feeConfig.getFeeScale()) / feeConfig.getfeeDecimal() ^ 1 == 0
-                        ? OrderFeeFulfil.MINIMUM_PERCENT_PRECISION
-                        : OrderFeeFulfil.MAXIMUM_PERCENT_PRECISION; 
+                        ? (order.totalPrice * feeConfig.getFeeScale() / OrderFeeFulfil.MINIMUM_PERCENT_PRECISION)
+                        : (order.totalPrice * feeConfig.getFeeScale() / OrderFeeFulfil.MAXIMUM_PERCENT_PRECISION); 
                 completeRewardAmount = order.totalPrice - feeAmount;
+                emit A(feeAmount, completeRewardAmount, order.totalPrice);
             }
             _sendValue(feeConfig.getFeeTo(), feeAmount);
         } else {
@@ -183,41 +180,36 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
 
         _withdrowEscrowFund(orderId);
         _sendValue(order.client, completeRewardAmount);
-        try IWonderJobArbitrationCallback.orderValidatorCallWithFallback(msg.sender, order) returns (bool fallbackStatus) {
-            assembly {
-                if iszero(fallbackStatus) {
-                    mstore(0x00, 0xa)
-                    revert(0x00, 0x04)
-                }
-            }
-        } catch (bytes memory err){
-            revert(string(err));
-        }
+        WonderJobArbitration.orderValidatorCallWithFallback(msg.sender, order);
     }
-
-    function disputeOrder() external {
+/*
+    function disputeOrder(address serviceProvider, uint256 orderNonce) external {
         
     }
 
-    function resolveisputeOrder() external {
+    function resolveisputeOrder(address serviceProvider, uint256 orderNonce) external {
 
     }
-
+*/
     function withdrowEscrowFundWithClient() external {
         if (_usersOperation.getTakeOrder(msg.sender)) revert ClientIsTakeOrder();
         _withdrowEscrowFundWithClient();
     }
 
-    function setFee(bool enable) public {
+    function setFee(bool enable) public onlyOwner {
         if (enable) feeConfig.setFeeOn(msg.sender); else feeConfig.setFilpFeeOn(msg.sender);
+    }
+
+    function setFeeConfig(uint24[4] memory feeScales, address feeTo) external onlyOwner {
+        feeConfig.setFeeScale(feeScales, msg.sender, feeTo != address(0) ? feeTo : msg.sender);
     }
 
     function getOrderNonce(address user) public view returns (uint256) {
         return _orderGenerator.getOrderNonce(user);
     }
 
-    function getOrderId() public view returns (bytes32) {
-        return _userOrders.getOrderId(msg.sender, getOrderNonce(msg.sender));
+    function getOrderId(uint256 orderNonce) public view returns (bytes32) {
+        return _userOrders.getOrderId(msg.sender, orderNonce);
     }
 
     function getUserProfile() public view returns (User memory _user) {

@@ -19,7 +19,7 @@ library OrderFeeFulfil {
     uint256 internal constant MINIMUM_PERCENT_PRECISION = 1_000; // 0.0X% 
     uint256 internal constant MAXIMUM_PERCENT_PRECISION = 1_000_00; // 0.00X%
 
-    function setFeeScale(FeeConfig storage self, uint24[3] memory feeScales, address executor) internal {
+    function setFeeScale(FeeConfig storage self, uint24[4] memory feeScales, address executor, address feeTo) internal {
         if (self.lastExecutor != executor) self.lastExecutor = executor;
         require(
             feeScales[0] >= feeScales[1] && feeScales[0] <= feeScales[2],
@@ -27,8 +27,10 @@ library OrderFeeFulfil {
         );
 
         self.feeScale = feeScales[0];
-        self.feeMaxScale = feeScales[1];
-        self.feeMinScale = feeScales[2];
+        self.feeMinScale = feeScales[1];
+        self.feeMaxScale = feeScales[2];
+        self.feeDecimal = feeScales[3];
+        self.feeTo = feeTo;
     }
 
     function setFeeOn(FeeConfig storage self, address executor) internal {

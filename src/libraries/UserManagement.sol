@@ -73,6 +73,10 @@ library UserManagement {
         }
     }
 
+    function setTakeOrderStatus(UsersOperation storage self, address user) internal {
+        self.usersBitMap[user] |= (1 << BITMASK_TAKE_ORDER);
+    }
+
     function getUserCustomer(UsersOperation storage self, address user) internal view returns (bool) {
         return (self.usersBitMap[user] >> BITMASK_COUSTOMER) & 1 == 1;
     }

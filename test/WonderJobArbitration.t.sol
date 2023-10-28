@@ -55,4 +55,9 @@ contract WonderJobArbitrationTest is Test {
         console.logUint(userEstimate.totalSpent);
         console.logUint(userEstimate.totalEarned);
     }
+
+    function testGetResolveDisputeFee() public {
+        uint256 fee = wonderJobArbitration.getResolveDisputeFee();
+        assertEq(fee, 0.01 ether);
+    }
 }

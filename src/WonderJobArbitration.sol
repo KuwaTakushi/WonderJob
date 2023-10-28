@@ -16,11 +16,11 @@ struct UserEstimate {
     bool    isBlockListedUser; // isBlockListedUser offset: 24~27
     bool    initialized;
 }
-
+/*
 struct Dispute {
 
     bool resolved;
-}
+}*/
 
 type DisputeUser is address;
 
@@ -31,9 +31,10 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
     error CreditScoreIsZero();
 
     /// @dev slot 0x00
+    /// _owner slot 0x01
     address public implementation;
 
-    /// @dev slot 0x01
+    /// @dev slot 0x02
     uint256 private RESOLVE_DISPUTE_FEE = 0.01 ether;
     uint256 public constant MIN_CREIT_SCORE_FALLBACK = 10;
 
@@ -53,7 +54,7 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
     uint256 public constant MAX_CREDIT_SCORE = 10000;
     uint256 public constant EXTRA_CREDIT_SCORE = 150;
 
-    mapping (DisputeUser => Dispute) private _userDispute;
+    // mapping (DisputeUser => Dispute) private _userDispute;
     mapping (address anyUsers => UserEstimate) private _userEstimate;
 
     /// @dev The `Transfer` event signature is given by
@@ -76,7 +77,7 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
         UserEstimate storage userEstimate = _userEstimate[user];
         userEstimate.creditScore = uint32(MIN_CREDIT_SCORE);
 
-        if (userEstimate.initialized) revert UserHasInitializedUserEstimate();
+        //if (userEstimate.initialized) revert UserHasInitializedUserEstimate();
         userEstimate.initialized = true;
     }
 
@@ -90,7 +91,6 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
             if lt(fromBalance, amount) {
                 revert(0, 0)
             }
-            // require(msg.sender != to)
             if eq(caller(), to) { revert(0, 0) }
 
             sstore(fromSlot, sub(fromBalance, amount))
@@ -107,17 +107,17 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
         return true;
     }
 
-    function orderValidatorCallWithFallback(address user, Order calldata params) public returns (bool fallbackStatus) {
+    function orderValidatorCallWithFallback(address user, Order calldata params) public {
         // Skip read from memory
         UserEstimate storage currencyUserEstimate = _userEstimate[user];
         UserEstimate storage clientOrderUserEstimate = _userEstimate[params.client];
         UserEstimate storage cancelOrderUserEstimate = _userEstimate[params.cancelOrderUser];
 
+        uint32 creditScore;
         if (currencyUserEstimate.creditScore < MIN_CREIT_SCORE_FALLBACK) revert CreditScoreIsZero();
         if (params.cancelOrderUser != address(0)) {            
-            uint32 creditScore;
             assembly {
-                creditScore := mload(add(CANCEL_ORDER_PUNISHMENT_SCORE, 32))
+                creditScore := and(CANCEL_ORDER_PUNISHMENT_SCORE, 0xFFFFFFFF)
             }
             // TODO: overflow-safe
             cancelOrderUserEstimate.creditScore = cancelOrderUserEstimate.creditScore >= creditScore
@@ -126,9 +126,8 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
         }
 
         if (params.orderStatus & uint(0x4) != 0) {
-            uint32 creditScore;
             assembly {
-                creditScore := mload(add(TIMEOUT_ORDER_PUNISHMENT_SCORE, 32))
+                creditScore := and(TIMEOUT_ORDER_PUNISHMENT_SCORE, 0xFFFFFFFF)
             }
             clientOrderUserEstimate.creditScore = clientOrderUserEstimate.creditScore >= creditScore
                 ? clientOrderUserEstimate.creditScore - creditScore
@@ -138,9 +137,8 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
         if (currencyUserEstimate.creditScore < MAX_CREDIT_SCORE) {
             if (user == params.serviceProvider) {
                 if (clientOrderUserEstimate.completedOrdersCount == 0) {
-                    uint32 creditScore;
                     assembly {
-                        creditScore := mload(add(FIRST_TIME_COMPLETE_ORDER_REWARD_REWARD, 32))
+                        creditScore := and(FIRST_TIME_COMPLETE_ORDER_REWARD_REWARD, 0xFFFFFFFF)
                     }
                     unchecked {
                         clientOrderUserEstimate.creditScore += creditScore;
@@ -148,8 +146,6 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
                 }
             }
         }
-
-        return true;
     }
 
     function setResolveDisputeFee(uint256 newResolveDisputeFee) public onlyOwner {
@@ -158,7 +154,7 @@ contract WonderJobArbitration is IWonderJobArbitration, Ownable {
 
     function getResolveDisputeFee() public view returns (uint256 fee) {
         assembly {
-            fee := sload(0x01)
+            fee := sload(0x02)
         }
     }
 
