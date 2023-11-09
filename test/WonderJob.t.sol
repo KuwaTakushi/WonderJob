@@ -279,6 +279,53 @@ contract WonderJobTest is Test {
         }
     }
 
+    function testCancelOrder() public {
+        // Create Order
+        address createOrderUser;
+        uint256 createOrderUserPrivateKey;
+        uint256 orderNonce;
+        {
+            (createOrderUser, createOrderUserPrivateKey) = makeAddrAndKey('cancelOrderUser');
+            vm.label(createOrderUser, "serviceProvider");
+            vm.deal(createOrderUser, 1 ether);
+            User memory user = User(createOrderUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
+            wonderJob.createUser(user);
+
+            uint32 orderDeadline = uint32(GLOBAL_UNIX_TIMESTAMP) + uint32(1 days);
+            uint96 orderPrice = 0.1 ether;
+            bytes32 ipfsLink = bytes32(bytes("https://ipfs.io/ipfs/QmNZiPk974vDsPmQii3YbrMKfi12KTSNM7XMiYyiea4VYZ/example"));
+            uint256 nonce = wonderJob.getOrderNonce(createOrderUser);
+            bytes32 digest = bytes32(abi.encodePacked(orderDeadline, orderPrice, ipfsLink, nonce));
+
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(createOrderUserPrivateKey, digest);
+
+            vm.startPrank(createOrderUser);
+            wonderJob.createOrder{value: 0.1 ether}(orderDeadline, orderPrice, ipfsLink, digest, v, r, s);
+            orderNonce = wonderJob.getOrderNonce(createOrderUser);
+            console.logUint(orderNonce);
+            vm.stopPrank();
+        }
+
+        {
+            // Accept order
+            address clientUser = makeAddr("cancelOrderClient");
+            vm.label(clientUser, "client");
+            vm.deal(clientUser, 1 ether);
+            vm.startPrank(clientUser);
+            User memory client = User(clientUser, true, true, true, GLOBAL_UNIX_TIMESTAMP);
+            wonderJob.createUser(client);
+            wonderJob.depositEscrowFundWithClient(1 ether);
+            wonderJob.acceptOrder(createOrderUser, 0);
+            
+            // Cancel order
+            wonderJob.cancelOrder(createOrderUser, 0);
+
+            IWonderJobArbitration.getUserEstimate(clientUser);
+            IWonderJobArbitration.getUserEstimate(createOrderUser);
+            vm.stopPrank();
+        }
+    }
+
     function testCancelOrderWithServiceProvider() public {
         // Create Order
         address createOrderUser;
@@ -316,7 +363,10 @@ contract WonderJobTest is Test {
             wonderJob.createUser(client);
             wonderJob.depositEscrowFundWithClient(1 ether);
             wonderJob.acceptOrder(createOrderUser, 0);
+            vm.stopPrank();
+            
             // Cancel order
+            vm.startPrank(createOrderUser);
             wonderJob.cancelOrder(createOrderUser, 0);
 
             IWonderJobArbitration.getUserEstimate(clientUser);
