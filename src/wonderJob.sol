@@ -4,7 +4,7 @@ pragma solidity ^0.8.18;
 import {User, UserManagement} from "./libraries/UserManagement.sol";
 import {OrderExecutor, Order} from "./libraries/OrderExecutor.sol";
 import {OrderFeeFulfil} from "./libraries/LibOrderFee.sol";
-import "./WonderJobFundEscrowPool.sol";
+import {WonderJobFundEscrowPool} from "./WonderJobFundEscrowPool.sol";
 import {ECDSA} from "./utils/ECDSA.sol";
 import "./interfaces/IWonderJobArbitration.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -34,7 +34,7 @@ error InsufficientEscrowAmount(uint128 escrowAmount);
 error ClientIsTakeOrder();
 error OrderException();
 
-contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable {
+contract WonderJobV2 is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable {
 
     using ECDSA for bytes32;
     using OrderExecutor for *;
@@ -53,6 +53,17 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         // feeConfig.initialize();
     }
 
+
+    uint256 public signatureInProgress = 1;
+    /// @dev High rise point => Avoid identical signature replay attacks.
+    /// See https://twitter.com/nl__park/status/1680936278303580160
+    modifier signatureInProgressLocker() {
+        require(signatureInProgress == 1, "Signature is inn progress");
+        signatureInProgress = 2;
+        _;
+        signatureInProgress = 1;
+    }
+
     function createUser(User calldata user) public {
         _usersOperation.createUser(user);
         WonderJobArbitration.initializeUserEstimate(user.userAddress);
@@ -66,18 +77,18 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) external payable {
-        if (!_usersOperation.getUserCustomer(msg.sender) || !_usersOperation.getUserServiceProvider(msg.sender)) revert UserHasNoAuthorization();
+    ) external payable signatureInProgressLocker {
+        if (!_usersOperation.getUserCustomer(_msgSender()) || !_usersOperation.getUserServiceProvider(_msgSender())) revert UserHasNoAuthorization();
         if (msg.value < orderPrice) revert InsufficientFunds(msg.value);
 
-        uint256 nonce = getOrderNonce(msg.sender);
+        uint256 nonce = getOrderNonce(_msgSender());
 
-        if (_userOrders.getOrderServiceProvider(msg.sender, nonce, hash) != address(0)) revert OrderException();
-        if (msg.sender != hash.recover(v, r, s)) revert InvalidSignature(hash);
+        if (_userOrders.getOrderServiceProvider(_msgSender(), nonce, hash) != address(0)) revert OrderException();
+        if (_msgSender() != hash.recover(v, r, s)) revert InvalidSignature(hash);
         _userOrders._createOrder(
             _orderGenerator,
             nonce,
-            msg.sender,
+            _msgSender(),
             orderDeadline,
             orderPrice,
             ipfsLink,
@@ -102,16 +113,16 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
             ) != serviceProvider
         ) revert OrderException();
 
-        if (!_usersOperation.getUserCustomer(msg.sender)) revert UserHasNoAuthorization();
+        if (!_usersOperation.getUserCustomer(_msgSender())) revert UserHasNoAuthorization();
         if (_userOrders.getOrderStatus(serviceProvider, orderNonce, orderId) & uint8(0x4) != 0) revert OrderInModify();
         if (_userOrders.getOrderClient(serviceProvider, orderNonce, orderId) != address(0)) revert OrderAccepted();
         
-        require(getClientEscrowFundBalanceof(msg.sender) > 0, "The user escrow fund balance is zero");
-        _userOrders.acceptOrder(serviceProvider, orderNonce, orderId, msg.sender);
+        require(getClientEscrowFundBalanceof() > 0, "The user escrow fund balance is zero");
+        _userOrders.acceptOrder(serviceProvider, orderNonce, orderId, _msgSender());
     }
 
     function depositEscrowFundWithClient(uint128 escrowAmount) external payable {
-        uint256 balance = getClientEscrowFundBalanceof(msg.sender);
+        uint256 balance = getClientEscrowFundBalanceof();
         if (balance + escrowAmount < MIN_ESCROW_AMOUNT) revert InsufficientEscrowAmount(escrowAmount);
         _depositEscrowFundWithClient(escrowAmount);
     }
@@ -119,7 +130,7 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
     function submitOrder(address serviceProvider, uint256 orderNonce) external {
         bytes32 orderId = _userOrders.getOrderId(serviceProvider, orderNonce);
         if (_userOrders.getOrderServiceProvider(
-                serviceProvider, 
+                serviceProvider,
                 orderNonce,
                 orderId
             ) == address(0)
@@ -153,44 +164,34 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
 
         Order memory order = _userOrders.getOrderSituationByServiceProvider(serviceProvider, orderNonce, orderId);
         WonderJobArbitration.orderValidatorCallWithFallback(msg.sender, order);
-
     }
 
     /// @dev Make the function implement 'payable' to eliminate-boundary-checks
     /// require(msg.value >= 0)
-    event A(uint feeAmount, uint completeRewardAmount, uint price);
-    function completeOrder(bytes32 orderId) external payable {
+    /// The caller must be serviceProvider.
+    function completeOrder(address serviceProvider, bytes32 orderId) external payable {
+        require(msg.sender == serviceProvider, "The caller must be service provider");
         uint256 completeRewardAmount;
-        Order memory order = _userOrders.getOrderSituationByServiceProvider(msg.sender, _orderGenerator.getOrderNonce(msg.sender), orderId);
+        //  _orderGenerator.getOrderNonce(serviceProvider)-1 => 0 - 1 = 0(safe overflow)
+        Order memory order = _userOrders.getOrderSituationByServiceProvider(serviceProvider, _orderGenerator.getOrderNonce(serviceProvider) - 1, orderId);
         if (feeConfig.getFeeOn()) {
             uint256 feeAmount;
-            unchecked {
-                // Exercise caution with precision loss issue.
+            unchecked { // Exercise caution with precision loss issue.
                 feeAmount = (
-                    order.totalPrice * feeConfig.getFeeScale()) / feeConfig.getfeeDecimal() ^ 1 == 0
+                    order.totalPrice * feeConfig.getFeeScale()) / feeConfig.getfeeDecimal() == 1
                         ? (order.totalPrice * feeConfig.getFeeScale() / OrderFeeFulfil.MINIMUM_PERCENT_PRECISION)
                         : (order.totalPrice * feeConfig.getFeeScale() / OrderFeeFulfil.MAXIMUM_PERCENT_PRECISION); 
                 completeRewardAmount = order.totalPrice - feeAmount;
-                emit A(feeAmount, completeRewardAmount, order.totalPrice);
             }
             _sendValue(feeConfig.getFeeTo(), feeAmount);
         } else {
             completeRewardAmount = order.totalPrice;
         }
-
         _withdrowEscrowFund(orderId);
         _sendValue(order.client, completeRewardAmount);
         WonderJobArbitration.orderValidatorCallWithFallback(msg.sender, order);
     }
-/*
-    function disputeOrder(address serviceProvider, uint256 orderNonce) external {
-        
-    }
-
-    function resolveisputeOrder(address serviceProvider, uint256 orderNonce) external {
-
-    }
-*/
+    
     function withdrowEscrowFundWithClient() external {
         if (_usersOperation.getTakeOrder(msg.sender)) revert ClientIsTakeOrder();
         _withdrowEscrowFundWithClient();
@@ -225,6 +226,5 @@ contract WonderJob is WonderJobFundEscrowPool, Initializable, OwnableUpgradeable
             _user := user_
         }
     }
-
     receive() external payable {}
 }

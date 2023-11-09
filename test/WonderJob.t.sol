@@ -2,7 +2,7 @@
 pragma solidity ^0.8.18;
 
 import {Test, console} from "forge-std/Test.sol";
-import {WonderJob} from "../src/wonderJob.sol";
+import {WonderJobV2} from "../src/wonderJob.sol";
 import {UserEstimate, WonderJobArbitration} from "../src/WonderJobArbitration.sol";
 import {User} from "../src/libraries/UserManagement.sol";
 
@@ -22,7 +22,7 @@ contract WonderJobTest is Test {
     uint256 userAddressPrivateKey;
     address owner;
 
-    WonderJob wonderJob;
+    WonderJobV2 wonderJob;
     WonderJobArbitration IWonderJobArbitration;
 
     function setUp() public {
@@ -32,7 +32,7 @@ contract WonderJobTest is Test {
 
         vm.startPrank(owner);
         IWonderJobArbitration = new WonderJobArbitration();
-        wonderJob = new WonderJob(address(IWonderJobArbitration));
+        wonderJob = new WonderJobV2(address(IWonderJobArbitration));
         vm.stopPrank();
 
         // /*========== MULIT FORK MAINNET TEST ==========**/
@@ -367,7 +367,7 @@ contract WonderJobTest is Test {
             vm.startPrank(createOrderUser);
             // Complete order
             bytes32 orderId = wonderJob.getOrderId(0);
-            wonderJob.completeOrder(orderId);
+            wonderJob.completeOrder(createOrderUser, orderId);
 
             IWonderJobArbitration.getUserEstimate(clientUser);
             IWonderJobArbitration.getUserEstimate(createOrderUser);
@@ -383,7 +383,7 @@ contract WonderJobTest is Test {
         feeScales[1] = 5;
         feeScales[2] = 15;
         feeScales[3] = 1;
-        wonderJob.setFeeConfig(feeScales, address(0));
+        wonderJob.setFeeConfig(feeScales, owner);
         wonderJob.setFee(true);
         vm.stopPrank();
 
@@ -428,7 +428,7 @@ contract WonderJobTest is Test {
             vm.startPrank(createOrderUser);
             // Complete order
             bytes32 orderId = wonderJob.getOrderId(0);
-            wonderJob.completeOrder(orderId);
+            wonderJob.completeOrder(createOrderUser, orderId);
 
             IWonderJobArbitration.getUserEstimate(clientUser);
             IWonderJobArbitration.getUserEstimate(createOrderUser);
